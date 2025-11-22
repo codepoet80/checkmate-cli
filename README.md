@@ -6,6 +6,7 @@ A command-line client for the Checkmate todo list service, written in Python 3 w
 
 - List, add, update, and delete tasks
 - Mark tasks as complete/incomplete
+- View task notes quickly
 - Clean up completed tasks
 - Simple configuration management
 - Uses only Python 3 standard library
@@ -73,47 +74,57 @@ You can also provide these as command-line arguments:
 ### Complete a Task
 
 ```bash
-# Mark task as completed (use GUID or prefix)
-./checkmate.py complete abc123de
+# Mark task as completed (use task number from list)
+./checkmate.py complete 5
 
 # Short alias
-./checkmate.py check abc123de
+./checkmate.py check 5
 ```
 
 ### Uncomplete a Task
 
 ```bash
 # Mark task as incomplete
-./checkmate.py uncomplete abc123de
+./checkmate.py uncomplete 5
 
 # Short alias
-./checkmate.py uncheck abc123de
+./checkmate.py uncheck 5
 ```
 
 ### Update a Task
 
 ```bash
 # Update title
-./checkmate.py update abc123de --title "New title"
+./checkmate.py update 5 --title "New title"
 
 # Update notes
-./checkmate.py update abc123de --notes "Updated notes"
+./checkmate.py update 5 --notes "Updated notes"
 
 # Update both
-./checkmate.py update abc123de -t "New title" -n "New notes"
+./checkmate.py update 5 -t "New title" -n "New notes"
+```
+
+### View Task Notes
+
+```bash
+# Show notes for a task
+./checkmate.py note 5
+
+# Alias
+./checkmate.py notes 5
 ```
 
 ### Delete a Task
 
 ```bash
 # Delete with confirmation
-./checkmate.py delete abc123de
+./checkmate.py delete 5
 
 # Delete without confirmation
-./checkmate.py delete abc123de --force
+./checkmate.py delete 5 --force
 
 # Short alias
-./checkmate.py rm abc123de -f
+./checkmate.py rm 5 -f
 ```
 
 ### Cleanup Completed Tasks
@@ -154,9 +165,9 @@ The CLI uses:
 - Credentials are sent via HTTP headers (Grandmaster) and query parameters (move)
 - User-Agent header is included in all requests
 
-## Task GUID Format
+## Task Numbering
 
-Tasks are identified by GUIDs. When listing tasks, only the first 8 characters are shown for readability. You can use either the full GUID or a unique prefix when specifying tasks in commands.
+Tasks are displayed with sequential numbers (1, 2, 3, etc.) when you list them. Use these numbers to interact with tasks. The numbers correspond to the position in the list, making it easy to complete, update, or delete tasks without typing long IDs.
 
 ## License
 

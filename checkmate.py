@@ -74,25 +74,37 @@ class CheckmateClient:
         result = self._make_request('cleanup-notation.php')
         return result.get('tasks', [])
 
-    def find_task_by_guid(self, guid_or_prefix):
-        """Find a task by exact GUID or prefix match"""
-        tasks = self.get_tasks()
-        guid_lower = guid_or_prefix.lower()
+    def find_task_by_id(self, task_id):
+        """Find a task by position number or GUID"""
+        all_tasks = self.get_tasks()
 
-        # Try exact match first
-        task = next((t for t in tasks if t['guid'].lower() == guid_lower), None)
-        if task:
-            return task
+        # Sort all tasks by sortPosition in reverse order (newest first)
+        tasks = sorted(all_tasks, key=lambda t: t.get('sortPosition', 0), reverse=True)
 
-        # Try prefix match
-        matches = [t for t in tasks if t['guid'].lower().startswith(guid_lower)]
-        if len(matches) == 0:
-            raise Exception(f"No task found matching '{guid_or_prefix}'")
-        elif len(matches) > 1:
-            matching_guids = ', '.join([t['guid'][:8] for t in matches])
-            raise Exception(f"Ambiguous GUID prefix '{guid_or_prefix}' matches multiple tasks: {matching_guids}")
+        # Try as position number first
+        try:
+            position = int(task_id)
+            if position < 1 or position > len(tasks):
+                raise Exception(f"Task number {position} is out of range (1-{len(tasks)})")
+            return tasks[position - 1]  # Convert 1-based to 0-based index
+        except ValueError:
+            # Not a number, try as GUID
+            guid_lower = task_id.lower()
 
-        return matches[0]
+            # Try exact match first
+            task = next((t for t in all_tasks if t['guid'].lower() == guid_lower), None)
+            if task:
+                return task
+
+            # Try prefix match
+            matches = [t for t in all_tasks if t['guid'].lower().startswith(guid_lower)]
+            if len(matches) == 0:
+                raise Exception(f"No task found matching '{task_id}'")
+            elif len(matches) > 1:
+                matching_guids = ', '.join([t['guid'][:8] for t in matches])
+                raise Exception(f"Ambiguous GUID prefix '{task_id}' matches multiple tasks: {matching_guids}")
+
+            return matches[0]
 
     def create_task(self, title, notes=''):
         """Create a new task"""
@@ -107,9 +119,9 @@ class CheckmateClient:
         }
         return self.update_tasks(task)
 
-    def complete_task(self, guid, completed=True):
+    def complete_task(self, task_id, completed=True):
         """Mark a task as completed or uncompleted"""
-        task = self.find_task_by_guid(guid)
+        task = self.find_task_by_id(task_id)
 
         task['completed'] = completed
         if completed:
@@ -119,16 +131,16 @@ class CheckmateClient:
 
         return self.update_tasks(task)
 
-    def delete_task(self, guid):
+    def delete_task(self, task_id):
         """Delete a task by setting sortPosition to -1"""
-        task = self.find_task_by_guid(guid)
+        task = self.find_task_by_id(task_id)
 
         task['sortPosition'] = -1
         return self.update_tasks(task)
 
-    def update_task(self, guid, title=None, notes=None):
+    def update_task(self, task_id, title=None, notes=None):
         """Update task title and/or notes"""
-        task = self.find_task_by_guid(guid)
+        task = self.find_task_by_id(task_id)
 
         if title is not None:
             task['title'] = title[:200]
@@ -167,48 +179,49 @@ class ConfigManager:
         os.chmod(self.config_path, 0o600)
 
 
-def format_task(task, show_notes=False):
+def format_task(task, position, show_notes=False):
     """Format a task for display"""
     status = '✓' if task.get('completed') else '○'
     title = task.get('title', 'Untitled')
-    guid = task.get('guid', '')[:8]  # Show first 8 chars of GUID
 
-    output = f"  {status} [{guid}] {title}"
+    output = f"  {status} {position:2d}. {title}"
 
-    if show_notes and task.get('notes'):
-        output += f"\n    Notes: {task['notes']}"
+    if show_notes:
+        if task.get('notes'):
+            output += f"\n      Notes: {task['notes']}"
 
-    if task.get('completed') and task.get('completeTime'):
-        output += f"\n    Completed: {task['completeTime']}"
+        if task.get('completed') and task.get('completeTime'):
+            output += f"\n      Completed: {task['completeTime']}"
 
     return output
 
 
 def cmd_list(client, args):
     """List all tasks"""
-    tasks = client.get_tasks()
+    all_tasks = client.get_tasks()
 
-    if not tasks:
+    if not all_tasks:
         print("No tasks found.")
         return
 
-    # Separate completed and incomplete tasks
-    incomplete = [t for t in tasks if not t.get('completed')]
-    completed = [t for t in tasks if t.get('completed')]
+    # Sort all tasks by sortPosition in reverse order (newest first)
+    tasks = sorted(all_tasks, key=lambda t: t.get('sortPosition', 0), reverse=True)
 
-    if incomplete:
-        print("Incomplete Tasks:")
-        for task in sorted(incomplete, key=lambda t: t.get('sortPosition', 0)):
-            print(format_task(task, args.verbose))
+    # Filter out completed tasks if requested
+    if args.hide_completed:
+        tasks = [t for t in tasks if not t.get('completed')]
 
-    if completed and not args.hide_completed:
-        if incomplete:
-            print()
-        print("Completed Tasks:")
-        for task in sorted(completed, key=lambda t: t.get('sortPosition', 0)):
-            print(format_task(task, args.verbose))
+    # Count totals
+    incomplete = sum(1 for t in all_tasks if not t.get('completed'))
+    completed = sum(1 for t in all_tasks if t.get('completed'))
 
-    print(f"\nTotal: {len(incomplete)} incomplete, {len(completed)} completed")
+    # Display all tasks in one list
+    position = 1
+    for task in tasks:
+        print(format_task(task, position, args.verbose))
+        position += 1
+
+    print(f"\nTotal: {incomplete} incomplete, {completed} completed")
 
 
 def cmd_add(client, args):
@@ -219,32 +232,43 @@ def cmd_add(client, args):
 
 def cmd_complete(client, args):
     """Mark task as completed"""
-    tasks = client.complete_task(args.guid, completed=True)
-    print(f"Task {args.guid} marked as completed")
+    tasks = client.complete_task(args.task_id, completed=True)
+    print(f"Task {args.task_id} marked as completed")
 
 
 def cmd_uncomplete(client, args):
     """Mark task as not completed"""
-    tasks = client.complete_task(args.guid, completed=False)
-    print(f"Task {args.guid} marked as incomplete")
+    tasks = client.complete_task(args.task_id, completed=False)
+    print(f"Task {args.task_id} marked as incomplete")
 
 
 def cmd_delete(client, args):
     """Delete a task"""
     if not args.force:
-        response = input(f"Delete task {args.guid}? [y/N] ")
+        response = input(f"Delete task {args.task_id}? [y/N] ")
         if response.lower() not in ('y', 'yes'):
             print("Cancelled")
             return
 
-    tasks = client.delete_task(args.guid)
-    print(f"Task {args.guid} deleted")
+    tasks = client.delete_task(args.task_id)
+    print(f"Task {args.task_id} deleted")
 
 
 def cmd_update(client, args):
     """Update a task"""
-    tasks = client.update_task(args.guid, args.title, args.notes)
-    print(f"Task {args.guid} updated")
+    tasks = client.update_task(args.task_id, args.title, args.notes)
+    print(f"Task {args.task_id} updated")
+
+
+def cmd_note(client, args):
+    """Show note for a task"""
+    task = client.find_task_by_id(args.task_id)
+
+    print(f"Task: {task['title']}")
+    if task.get('notes'):
+        print(f"Notes: {task['notes']}")
+    else:
+        print("No notes")
 
 
 def cmd_cleanup(client, args):
@@ -301,22 +325,26 @@ def main():
 
     # Complete command
     complete_parser = subparsers.add_parser('complete', aliases=['check'], help='Mark task as completed')
-    complete_parser.add_argument('guid', help='Task GUID (or prefix)')
+    complete_parser.add_argument('task_id', help='Task number from list')
 
     # Uncomplete command
     uncomplete_parser = subparsers.add_parser('uncomplete', aliases=['uncheck'], help='Mark task as incomplete')
-    uncomplete_parser.add_argument('guid', help='Task GUID (or prefix)')
+    uncomplete_parser.add_argument('task_id', help='Task number from list')
 
     # Delete command
     delete_parser = subparsers.add_parser('delete', aliases=['rm'], help='Delete a task')
-    delete_parser.add_argument('guid', help='Task GUID (or prefix)')
+    delete_parser.add_argument('task_id', help='Task number from list')
     delete_parser.add_argument('-f', '--force', action='store_true', help='Skip confirmation')
 
     # Update command
     update_parser = subparsers.add_parser('update', help='Update a task')
-    update_parser.add_argument('guid', help='Task GUID (or prefix)')
+    update_parser.add_argument('task_id', help='Task number from list')
     update_parser.add_argument('-t', '--title', help='New title')
     update_parser.add_argument('-n', '--notes', help='New notes')
+
+    # Note command
+    note_parser = subparsers.add_parser('note', aliases=['notes'], help='Show notes for a task')
+    note_parser.add_argument('task_id', help='Task number from list')
 
     # Cleanup command
     cleanup_parser = subparsers.add_parser('cleanup', help='Remove all completed tasks')
@@ -363,6 +391,8 @@ def main():
             cmd_delete(client, args)
         elif args.command == 'update':
             cmd_update(client, args)
+        elif args.command in ('note', 'notes'):
+            cmd_note(client, args)
         elif args.command == 'cleanup':
             cmd_cleanup(client, args)
         else:
