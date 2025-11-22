@@ -1,0 +1,8 @@
+# Checkmate CLI Configuration Example
+# Copy this file to ~/.checkmate.conf and update with your settings
+# Or run: ./checkmate.py login
+
+[DEFAULT]
+base_url = http://localhost/checkmate-service
+move = King to Queen 4
+grandmaster = Kasparov
